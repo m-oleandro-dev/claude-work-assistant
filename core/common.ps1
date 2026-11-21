@@ -89,7 +89,7 @@ function Set-WAState([string]$name, [string]$value) {
   $tmp = "$($script:WAState).tmp"
   [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
   # Sostituzione atomica quando il file esiste: chi legge non trova mai uno stato mancante.
-  if (Test-Path -LiteralPath $script:WAState) { [IO.File]::Replace($tmp, $script:WAState, $null) }
+  if (Test-Path -LiteralPath $script:WAState) { [IO.File]::Replace($tmp, $script:WAState, [NullString]::Value) }
   else { Move-Item -LiteralPath $tmp -Destination $script:WAState -Force }
 }
 
