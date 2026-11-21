@@ -52,6 +52,10 @@ Altri moduli arriveranno: ognuno e una cartella in `modules/` e si attiva o disa
   identici vengono scartati (impronte SHA1 in `spoken.hashes`). Spegnere il modulo svuota la coda e ferma la lettura.
 - Registro: `%TEMP%\claude-voice-reader.log`. Prove senza audio: `CLAUDE_WORK_ASSISTANT_DRYRUN=1`
   (vale anche il vecchio `CLAUDE_VOICE_READER_DRYRUN=1`).
+- **Pronuncia inglese**: i termini tecnici inglesi (file, commit, branch, settings, sigle come API) vengono letti
+  con pronuncia inglese anche dalla voce italiana: `espeak-ng.dll` trascrive ogni parola in IPA (inglese per i
+  termini riconosciuti da un dizionario e da alcune euristiche, italiano per il resto) e sherpa-onnx legge il testo
+  con quel lessico. Se la DLL manca o qualcosa fallisce, si torna alla lettura normale tutta italiana.
 - Dati della voce: `%USERPROFILE%\.claude\work-assistant\voice-data`. La vecchia cartella
   `%USERPROFILE%\.claude\voice-reader-data` e il file `%USERPROFILE%\.claude\voice-off` della versione 0.1
   **non sono piu usati**: puoi cancellarli, oppure spostare `voice-reader-data` in `work-assistant\voice-data`
@@ -65,7 +69,7 @@ Altri moduli arriveranno: ognuno e una cartella in `modules/` e si attiva o disa
 | `/assistente <modulo> on` / `off` | attiva / disattiva un modulo (per esempio `/assistente voce on`) |
 | `/assistente <modulo> reset` | torna al valore predefinito del modulo |
 | `/assistente <modulo>` | stato del modulo e suoi sottocomandi |
-| `/assistente voce install` | scarica motore e voce Paola (circa 85 MB) |
+| `/assistente voce install` | scarica motore, voce Paola ed espeak-ng.dll (circa 100 MB); `voce on` lo fa gia da solo se manca qualcosa |
 
 `/voce` resta come scorciatoia di `/assistente voce` (`/voce on`, `/voce off`, `/voce install`; senza argomenti
 mostra lo stato, non inverte piu).
@@ -123,12 +127,15 @@ Dentro Claude Code:
 /plugin install work-assistant@work-assistant-marketplace
 ```
 
-L'orchestratore e attivo subito. Per la voce:
+L'orchestratore e attivo subito. Per la voce basta un comando: la prima volta scarica da solo motore, voce Paola
+e pronuncia inglese (circa 100 MB):
 
 ```
 /assistente voce on
-/assistente voce install
 ```
+
+I due comandi del plugin sono richiesti da Claude Code (prima si aggiunge il marketplace, poi si installa): non
+si possono fondere, ma si incollano di seguito.
 
 Se avevi installato la versione precedente (`voice-reader`), disinstallala, altrimenti le risposte vengono lette due volte.
 
@@ -145,7 +152,8 @@ dell'installazione componenti di terze parti, che **non sono ridistribuiti** in 
 
 - motore [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.12.40: Apache-2.0 (le versioni 2.x non includono
   piu il convertitore di fonemi per l'italiano);
-- dati di fonemizzazione espeak-ng (inclusi nel pacchetto della voce): GPL-3.0;
+- dati di fonemizzazione espeak-ng (inclusi nel pacchetto della voce) ed `espeak-ng.dll` (estratta dal pacchetto
+  Piper per Windows, rhasspy/piper 2023.11.14-2): GPL-3.0;
 - voce `vits-piper-it_IT-paola-medium` (rhasspy/piper-voices): MIT; dataset della voce Paola: CC0; modello di base
   da cui e stata addestrata (hifi_tts): CC BY 4.0.
 

@@ -4,6 +4,7 @@
 # CLAUDE_WORK_ASSISTANT_DRYRUN=1 (o il vecchio CLAUDE_VOICE_READER_DRYRUN=1): sintetizza ma non riproduce (attende 1 s).
 $ErrorActionPreference = 'Continue'
 . (Join-Path $PSScriptRoot 'voice-queue.ps1')
+. (Join-Path $PSScriptRoot 'phonemize.ps1')
 
 $root = $script:VoiceData
 $bin = Get-ChildItem (Join-Path $root 'sherpa') -Recurse -Filter 'sherpa-onnx-offline-tts.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -17,8 +18,21 @@ function Invoke-Speak([string]$text, [string]$name) {
   if ($bin -and (Test-Path "$m\it_IT-paola-medium.onnx")) {
     # L'eseguibile legge gli argomenti come UTF-8, ma PowerShell 5.1 li codifica con la codepage ANSI:
     # passo i byte UTF-8 riletti come ANSI, cosi arrivano intatti (accenti compresi).
-    $arg = [Text.Encoding]::Default.GetString([Text.Encoding]::UTF8.GetBytes($text.Replace('"', ' ')))
-    & $bin.FullName "--vits-model=$m\it_IT-paola-medium.onnx" "--vits-tokens=$m\tokens.txt" "--vits-data-dir=$m\espeak-ng-data" "--output-filename=$wav" $arg *> $null
+    $clean = $text.Replace('"', ' ')
+    # Pronuncia inglese dei termini tecnici: lessico generato con espeak-ng.dll; se manca o fallisce, modalita normale.
+    $lex = $null
+    try { $lex = New-VoiceLexicon $clean $root $m "$m\tokens.txt" } catch { Write-VoiceLog "lessico non creato: $($_.Exception.Message)" }
+    if ($lex) {
+      $lexFile = Join-Path $env:TEMP 'claude-voice-reader-lexicon.txt'
+      [IO.File]::WriteAllText($lexFile, $lex.Lexicon, (New-Object Text.UTF8Encoding($false)))
+      $arg = [Text.Encoding]::Default.GetString([Text.Encoding]::UTF8.GetBytes($lex.Text))
+      & $bin.FullName "--vits-model=$m\it_IT-paola-medium.onnx" "--vits-tokens=$m\tokens.txt" "--vits-lexicon=$lexFile" "--output-filename=$wav" $arg *> $null
+      if (-not (Test-Path $wav)) { Write-VoiceLog 'sintesi con lessico non riuscita, riprovo in modalita normale' }
+    }
+    if (-not (Test-Path $wav)) {
+      $arg = [Text.Encoding]::Default.GetString([Text.Encoding]::UTF8.GetBytes($clean))
+      & $bin.FullName "--vits-model=$m\it_IT-paola-medium.onnx" "--vits-tokens=$m\tokens.txt" "--vits-data-dir=$m\espeak-ng-data" "--output-filename=$wav" $arg *> $null
+    }
   }
   if (Test-Path $wav) {
     Write-VoiceLog "inizio lettura $name (Paola, wav $((Get-Item $wav).Length) byte)"
