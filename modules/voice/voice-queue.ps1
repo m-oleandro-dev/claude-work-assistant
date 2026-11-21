@@ -111,6 +111,10 @@ function ConvertTo-SpokenText([string]$text) {
   $text = $text.Replace([string][char]0x2018, "'").Replace([string][char]0x2019, "'")
   $text = $text.Replace([string][char]0x201C, ' ').Replace([string][char]0x201D, ' ')
   $text = $text.Replace([string][char]0x2013, ', ').Replace([string][char]0x2014, ', ').Replace([string][char]0x2026, '...')
+  # Numeri di versione (0.3.3): "zero punto tre punto tre"; decimali (3.5): "tre virgola cinque". Senza questo il
+  # punto verrebbe letto come fine frase o pronunciato male.
+  $text = [regex]::Replace($text, '\d+(?:\.\d+){2,}', { param($mt) $mt.Value.Replace('.', ' punto ') })
+  $text = [regex]::Replace($text, '(\d)\.(\d)', '$1 virgola $2')
   $text = [regex]::Replace($text, '\s+', ' ').Trim()
   if ($text.Length -gt 1500) { $text = $text.Substring(0, 1500) + '... risposta troncata.' }
   return $text
