@@ -1,0 +1,9 @@
+{
+  "name": "work-assistant",
+  "version": "0.2.0",
+  "description": "Assistente di lavoro modulare per Claude Code: orchestratore che divide le richieste e delega a subagenti col modello adatto, lettura vocale opzionale (Windows, voce italiana Paola) e altri moduli in arrivo.",
+  "author": { "name": "claude-work-assistant contributors" },
+  "license": "MIT",
+  "network": { "hosts": ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"] },
+  "keywords": ["assistant", "orchestrator", "subagents", "tts", "voice", "accessibility", "italian"]
+}

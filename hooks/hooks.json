@@ -1,0 +1,20 @@
+{
+  "description": "work-assistant: un solo dispatcher per evento (core/dispatch.ps1), che esegue i gestori dei moduli attivi",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/core/dispatch.ps1\" -Event SessionStart", "timeout": 15 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/core/dispatch.ps1\" -Event UserPromptSubmit", "timeout": 15 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/core/dispatch.ps1\" -Event Stop", "timeout": 20 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/core/dispatch.ps1\" -Event SubagentStop", "timeout": 20 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "SubagentHandback", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/core/dispatch.ps1\" -Event PostToolUse", "timeout": 20 } ] }
+    ]
+  }
+}

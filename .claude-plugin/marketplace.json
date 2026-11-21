@@ -1,0 +1,8 @@
+{
+  "name": "work-assistant-marketplace",
+  "description": "Marketplace di claude-work-assistant: assistente di lavoro modulare per Claude Code.",
+  "owner": { "name": "claude-work-assistant contributors" },
+  "plugins": [
+    { "name": "work-assistant", "source": "./", "description": "Assistente di lavoro modulare: orchestratore di subagenti e lettura vocale opzionale (sperimentale, Windows)" }
+  ]
+}

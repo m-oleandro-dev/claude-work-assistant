@@ -1,0 +1,17 @@
+{
+  "name": "voice",
+  "aliases": ["voce"],
+  "description": "Lettura vocale delle risposte (Windows, voce italiana Paola in locale, con ripiego sulla voce di Windows)",
+  "default": "off",
+  "order": 50,
+  "hooks": {
+    "UserPromptSubmit": "voice-context.ps1",
+    "Stop": { "script": "speak.ps1", "args": { "Source": "Stop" } },
+    "SubagentStop": { "script": "speak.ps1", "args": { "Source": "SubagentStop" } },
+    "PostToolUse": { "script": "speak.ps1", "args": { "Source": "Handback" } }
+  },
+  "commands": {
+    "install": "install-voice.ps1"
+  },
+  "on_change": "state-changed.ps1"
+}

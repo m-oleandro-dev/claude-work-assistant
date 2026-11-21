@@ -1,0 +1,11 @@
+{
+  "name": "orchestrator",
+  "aliases": ["orchestratore"],
+  "description": "Sessione principale come orchestratore: divide le richieste e delega a subagenti con il modello adatto",
+  "default": "on",
+  "order": 10,
+  "hooks": {
+    "SessionStart": "session-start.ps1",
+    "UserPromptSubmit": "prompt-reminder.ps1"
+  }
+}
