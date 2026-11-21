@@ -48,6 +48,13 @@ foreach ($w in @('il','in','un','per','con','non','del','al','dal','nel','sul','
 $script:EnglishAcronyms = @{}
 foreach ($w in @('API','CLI','JSON','URL','HTTP','HTTPS','SQL','CSS','HTML','JS','PR','CI','UI','UX','SDK','IDE','CPU','GPU','RAM','SSH','TTS','MCP','LLM','AI','OK','ID','YAML','XML','CSV','PDF','AWS','GPT')) { $script:EnglishAcronyms[$w] = $true }
 
+# Pronunce scelte a mano (IPA) per parole che con la voce italiana suonano meglio all'italiana (es. "commit").
+# Si aggiungono qui; la chiave e la parola in minuscolo. 0x6B k, 0x254 (o aperta), 0x2C8 (accento).
+$script:IpaOverride = @{
+  'commit'  = ('k' + [char]0x0254 + 'm' + [char]0x02C8 + 'mit')
+  'commits' = ('k' + [char]0x0254 + 'm' + [char]0x02C8 + 'mits')
+}
+
 function Test-EnglishWord([string]$w) {
   $l = $w.ToLowerInvariant()
   if ($script:ItalianOverride.ContainsKey($l)) { return $false }
@@ -155,7 +162,7 @@ function New-VoiceLexiconCore([string]$text, [string]$voiceData, [string]$espeak
     if (-not $lex.ContainsKey($key)) {
       $voice = if (Test-EnglishWord $word) { 'en-us' } else { 'it' }
       [void][WAEsp]::Voice($voice)
-      $ipa = ([WAEsp]::Phon($word)).Replace(' ', '')
+      $ipa = if ($script:IpaOverride.ContainsKey($key)) { $script:IpaOverride[$key] } else { ([WAEsp]::Phon($word)).Replace(' ', '') }
       $ph = New-Object System.Text.StringBuilder
       foreach ($ch in $ipa.ToCharArray()) {
         if ($tokens.ContainsKey([string]$ch) -and $ch -ne '_') { [void]$ph.Append(' ').Append($ch).Append(' _') }
