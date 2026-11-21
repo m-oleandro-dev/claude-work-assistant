@@ -33,27 +33,36 @@ function ConvertTo-SherpaArg([string]$text) {
   return [Text.Encoding]::Default.GetString([Text.Encoding]::UTF8.GetBytes($s))
 }
 
-# Lancia sherpa con un tempo massimo; $true solo se termina bene e produce un wav plausibile.
-function Invoke-Sherpa([string[]]$options, [string]$arg, [string]$wavPath) {
+# Avvia sherpa senza attendere: restituisce l'oggetto da passare a Wait-Sherpa.
+function Start-Sherpa([string[]]$options, [string]$arg, [string]$wavPath) {
   Remove-Item $wavPath -Force -ErrorAction SilentlyContinue
   $all = @($options) + "--output-filename=$wavPath"
-  $cmd = (($all | ForEach-Object { '"' + $_ + '"' }) -join ' ') + ' "' + $arg + '"'
   $psi = New-Object Diagnostics.ProcessStartInfo
   $psi.FileName = $bin.FullName
-  $psi.Arguments = $cmd
+  $psi.Arguments = (($all | ForEach-Object { '"' + $_ + '"' }) -join ' ') + ' "' + $arg + '"'
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
   $psi.RedirectStandardOutput = $true
   $psi.RedirectStandardError = $true
   $p = [Diagnostics.Process]::Start($psi)
-  $so = $p.StandardOutput.ReadToEndAsync(); $se = $p.StandardError.ReadToEndAsync()  # svuota i tubi: niente blocchi
-  if (-not $p.WaitForExit($SynthTimeoutMs)) {
-    try { $p.Kill() } catch { }
+  # svuota i tubi (altrimenti sherpa si blocca se scrive molto)
+  return @{ Proc = $p; Wav = $wavPath; So = $p.StandardOutput.ReadToEndAsync(); Se = $p.StandardError.ReadToEndAsync(); Started = [DateTime]::UtcNow }
+}
+
+# Attende la fine (tempo massimo dalla partenza); $true solo se termina bene e produce un wav plausibile.
+function Wait-Sherpa($h) {
+  $left = [int]($SynthTimeoutMs - ([DateTime]::UtcNow - $h.Started).TotalMilliseconds)
+  if (-not $h.Proc.WaitForExit([Math]::Max($left, 1))) {
+    try { $h.Proc.Kill() } catch { }
     Write-VoiceLog "sherpa bloccato oltre $($SynthTimeoutMs / 1000) s: terminato"
     return $false
   }
-  if ($p.ExitCode -ne 0) { Write-VoiceLog "sherpa uscito con codice $($p.ExitCode)"; return $false }
-  return ((Test-Path $wavPath) -and (Get-Item $wavPath).Length -gt 1000)
+  if ($h.Proc.ExitCode -ne 0) { Write-VoiceLog "sherpa uscito con codice $($h.Proc.ExitCode)"; return $false }
+  return ((Test-Path $h.Wav) -and (Get-Item $h.Wav).Length -gt 1000)
+}
+
+function Invoke-Sherpa([string[]]$options, [string]$arg, [string]$wavPath) {
+  return (Wait-Sherpa (Start-Sherpa $options $arg $wavPath))
 }
 
 function Invoke-Speak([string]$text, [string]$name) {
@@ -64,30 +73,38 @@ function Invoke-Speak([string]$text, [string]$name) {
   if ($bin -and (Test-Path "$m\it_IT-paola-medium.onnx")) {
     $model = @("--vits-model=$m\it_IT-paola-medium.onnx", "--vits-tokens=$m\tokens.txt")
     # Il testo viene diviso in blocchi: le frasi tutte italiane restano nella modalita normale (migliore ritmo e
-    # pause, come prima); solo le frasi con parole inglesi usano il lessico (pronuncia inglese), una alla volta.
-    # I wav dei blocchi vengono poi uniti con una breve pausa. Se un blocco fallisce, si rilegge tutto in modo normale.
-    $parts = @()
-    $allOk = $true
+    # pause, come prima); solo le frasi con parole inglesi usano il lessico (pronuncia inglese). Tutti i blocchi
+    # vengono sintetizzati in parallelo e uniti con una breve pausa. Un blocco fallito viene rifatto in modo normale;
+    # se fallisce ancora, si rilegge tutto il testo in modo normale.
+    $jobs = @()
     $idx = 0
     foreach ($chunk in @(Split-SpeechChunks $text)) {
       $idx++
       $cw = Join-Path $env:TEMP "claude-voice-reader-$PID-$idx.wav"
-      $cok = $false
+      $lexFile = $null
+      $h = $null
       if ($chunk.English) {
         $lex = $null
         try { $lex = New-VoiceLexicon $chunk.Text $root $m "$m\tokens.txt" } catch { Write-VoiceLog "lessico non creato: $($_.Exception.Message)" }
         if ($lex) {
-          $lexFile = Join-Path $env:TEMP "claude-voice-reader-lexicon-$PID.txt"
+          $lexFile = Join-Path $env:TEMP "claude-voice-reader-lexicon-$PID-$idx.txt"
           [IO.File]::WriteAllText($lexFile, $lex.Lexicon, (New-Object Text.UTF8Encoding($false)))
-          $cok = Invoke-Sherpa ($model + "--vits-lexicon=$lexFile") (ConvertTo-SherpaArg $lex.Text) $cw
-          Remove-Item $lexFile -Force -ErrorAction SilentlyContinue
+          $h = Start-Sherpa ($model + "--vits-lexicon=$lexFile") (ConvertTo-SherpaArg $lex.Text) $cw
         }
       }
-      if (-not $cok) { $cok = Invoke-Sherpa ($model + "--vits-data-dir=$m\espeak-ng-data") (ConvertTo-SherpaArg $chunk.Text) $cw }
-      if (-not $cok) { $allOk = $false; break }
-      $parts += $cw
+      if (-not $h) { $h = Start-Sherpa ($model + "--vits-data-dir=$m\espeak-ng-data") (ConvertTo-SherpaArg $chunk.Text) $cw }
+      $jobs += @{ H = $h; Chunk = $chunk; Wav = $cw; Lex = $lexFile }
     }
-    if ($allOk -and $parts.Count -gt 0) { $ok = Join-Wavs $parts $wav }
+    $parts = @()
+    $allOk = ($jobs.Count -gt 0)
+    foreach ($j in $jobs) {
+      $cok = Wait-Sherpa $j.H
+      if ($j.Lex) { Remove-Item $j.Lex -Force -ErrorAction SilentlyContinue }
+      if (-not $cok) { $cok = Invoke-Sherpa ($model + "--vits-data-dir=$m\espeak-ng-data") (ConvertTo-SherpaArg $j.Chunk.Text) $j.Wav }
+      if (-not $cok) { $allOk = $false }
+      $parts += $j.Wav
+    }
+    if ($allOk) { $ok = Join-Wavs $parts $wav }
     foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
     if (-not $ok) {
       Write-VoiceLog 'sintesi a blocchi non riuscita, riprovo con tutto il testo in modalita normale'
