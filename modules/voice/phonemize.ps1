@@ -11,7 +11,7 @@ $script:TokenSet = $null
 # Termini inglesi frequenti nei testi tecnici che finiscono in vocale (le altre parole inglesi si riconoscono
 # dalle euristiche in Test-EnglishWord).
 $script:EnglishWords = @(
-  'file','files','code','make','page','image','release','service','feature','update','cache','queue','type','base',
+  'file','files','code','make','page','image','release','service','feature','update','cache','queue','type',
   'source','hook','hooks','plugin','plugins','debug','bug','bugs','frontend','backend','api','json','yaml','repo',
   'deploy','pull','request','merge','push','token','prompt','script','shell','terminal','server','client','build',
   'test','tests','log','logs','config','default','mode','model','agent','agents','session','claude','github','git',
@@ -20,7 +20,7 @@ $script:EnglishWords = @(
   'cloud','docker','python','node','module','modules','package','packages','dashboard','widget','browser','tab',
   'popup','login','logout','password','username','user','users','database','query','schema','table','index',
   'framework','library','function','class','object','string','array','boolean','null','undefined','true','false',
-  'error','warning','status','state','store','pipeline','workflow','review','fork','clone','tag','tags','issue',
+  'error','warning','status','store','pipeline','workflow','review','fork','clone','tag','tags','issue',
   'issues','ticket','sprint','backlog','roadmap','feedback','team','manager','owner','admin','root','home',
   'path','folder','directory','download','upload','backup','restore','reset','refresh','reload','restart','start',
   'stop','run','running','runtime','timeout','retry','fallback','format','lint','linter','parser','render',
@@ -37,22 +37,33 @@ $script:EnglishWords = @(
 $script:EnglishSet = @{}
 foreach ($w in $script:EnglishWords) { $script:EnglishSet[$w] = $true }
 
-# Parole brevi o comuni italiane che finiscono in consonante: non sono inglesi.
-$script:ItalianConsonantEnd = @('il','in','un','per','con','non','del','al','dal','nel','sul','ed','ad','od','gran','tram','film','gas','bus','bar','sport','lunedi')
+# Parole italiane (o prestiti letti all'italiana) che le euristiche prenderebbero per inglesi.
+$script:ItalianOverride = @{}
+foreach ($w in @('il','in','un','per','con','non','del','al','dal','nel','sul','ed','ad','od','gran','tram','film','gas','bus','bar','sport',
+  'quel','buon','qual','nessun','alcun','ognun','qualcun','nord','ovest','amor','signor','poter','virus','bonus','focus','forum','album',
+  'tennis','autobus','club','hotel','chef','super','inter','extra','taxi','kiwi','karate','yoga','yogurt','jazz','jeans','judo','whisky',
+  'kimono','bikini','state','base','cosi','piu','mister')) { $script:ItalianOverride[$w] = $true }
+
+# Sigle tecniche lette con le lettere inglesi; le altre sigle (INPS, RAI, IVA) restano italiane.
+$script:EnglishAcronyms = @{}
+foreach ($w in @('API','CLI','JSON','URL','HTTP','HTTPS','SQL','CSS','HTML','JS','PR','CI','UI','UX','SDK','IDE','CPU','GPU','RAM','SSH','TTS','MCP','LLM','AI','OK','ID','YAML','XML','CSV','PDF','AWS','GPT')) { $script:EnglishAcronyms[$w] = $true }
 
 function Test-EnglishWord([string]$w) {
   $l = $w.ToLowerInvariant()
+  if ($script:ItalianOverride.ContainsKey($l)) { return $false }
   if ($script:EnglishSet.ContainsKey($l)) { return $true }
-  if ($w.Length -ge 2 -and $w -ceq $w.ToUpperInvariant() -and $w -match '^[A-Z]+$') { return $true }  # sigle: API, CLI
-  if ($l -match "[^a-z']") { return $false }  # accenti, cifre: italiano
+  if ($w.Length -ge 2 -and $w -cmatch '^[A-Z]+$') { return $script:EnglishAcronyms.ContainsKey($w) }
+  if ($w.Contains("'")) {
+    # elisioni italiane (l'utente, dell'ora, quest'anno): italiano; contrazioni inglesi (don't, it's): inglese
+    return ($l -notmatch "^(l|un|dell|all|nell|sull|dall|coll|c|d|m|t|s|n|v|ch|quest|quell|anch|com|cos|sant|bell|nient|senz|quant|tutt|mezz|dov)'")
+  }
+  if ($l -match "[^a-z]") { return $false }  # accenti, cifre: italiano
   if ($l.Length -le 3) { return $false }
-  if ($script:ItalianConsonantEnd -contains $l) { return $false }
   if ($l -match '[kwxyj]') { return $true }
-  if ($l -match 'th|sh|ck|wh|ough|ing$|tion$|ness$|ment$|ly$|er$|or$') { return $true }
+  if ($l -match 'th|sh|ck|wh|ough|ing$|tion$|ness$|ment$|ly$') { return $true }
   if ($l -match '[^aeiou]$') { return $true }  # l'italiano finisce quasi sempre in vocale
   return $false
 }
-
 function Initialize-Espeak([string]$voiceData, [string]$espeakDataParent) {
   if ($script:EspeakReady) { return $true }
   if ($script:EspeakFailed) { return $false }
@@ -83,7 +94,8 @@ public static class WAEsp {
     byte[] b = Z(text);
     IntPtr mem = Marshal.AllocHGlobal(b.Length); Marshal.Copy(b, 0, mem, b.Length);
     IntPtr p = mem; StringBuilder sb = new StringBuilder();
-    while (p != IntPtr.Zero) { string r = Utf8(espeak_TextToPhonemes(ref p, 1, 2)); if (r != null) sb.Append(r).Append(' '); }
+    int guard = 0;
+    while (p != IntPtr.Zero && guard++ < 50) { string r = Utf8(espeak_TextToPhonemes(ref p, 1, 2)); if (r != null) sb.Append(r).Append(' '); }
     Marshal.FreeHGlobal(mem); return sb.ToString().Trim();
   }
 }
@@ -112,6 +124,24 @@ function Get-TokenSet([string]$tokensFile) {
 
 # Costruisce il lessico per il testo: restituisce @{ Text = <testo per sherpa>; Lexicon = <righe> } oppure $null.
 function New-VoiceLexicon([string]$text, [string]$voiceData, [string]$espeakDataParent, [string]$tokensFile) {
+  # Interruttore persistente: un crash nativo di espeak non si intercetta e uccide il worker prima di poter
+  # scrivere un log. Il file "espeak.probing" resta se il lavoro non e finito: al giro dopo il lessico si salta
+  # (per un giorno), cosi un crash costa al massimo un messaggio invece di ripetersi a ogni avvio.
+  $probe = Join-Path $voiceData 'espeak.probing'
+  if (Test-Path -LiteralPath $probe) {
+    if (((Get-Date) - (Get-Item -LiteralPath $probe).LastWriteTime).TotalHours -lt 24) {
+      Write-VoiceLog 'pronuncia inglese sospesa: il giro precedente con espeak non e finito (cancella espeak.probing per riprovare)'
+      return $null
+    }
+    Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+  }
+  Set-Content -LiteralPath $probe -Value 'probing' -Encoding ASCII
+  $res = New-VoiceLexiconCore $text $voiceData $espeakDataParent $tokensFile
+  Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+  return $res
+}
+
+function New-VoiceLexiconCore([string]$text, [string]$voiceData, [string]$espeakDataParent, [string]$tokensFile) {
   if (-not (Initialize-Espeak $voiceData $espeakDataParent)) { return $null }
   $tokens = Get-TokenSet $tokensFile
   $lex = New-Object 'System.Collections.Generic.Dictionary[string,string]'
@@ -130,13 +160,13 @@ function New-VoiceLexicon([string]$text, [string]$voiceData, [string]$espeakData
       foreach ($ch in $ipa.ToCharArray()) {
         if ($tokens.ContainsKey([string]$ch) -and $ch -ne '_') { [void]$ph.Append(' ').Append($ch).Append(' _') }
       }
-      if ($ph.Length -eq 0) { continue }
+      if ($ph.Length -eq 0) { $lex[$key] = $null; continue }
       $lex[$key] = $ph.ToString()
     }
-    [void]$outText.Append($key)
+    if ($null -ne $lex[$key]) { [void]$outText.Append($key) }
   }
   [void]$outText.Append($text.Substring($pos))
-  if ($lex.Count -eq 0) { return $null }
-  $lines = foreach ($k in $lex.Keys) { "$k _$($lex[$k])" }
+  $lines = @(foreach ($k in $lex.Keys) { if ($null -ne $lex[$k]) { "$k _$($lex[$k])" } })
+  if ($lines.Count -eq 0) { return $null }
   return @{ Text = $outText.ToString(); Lexicon = ($lines -join "`r`n") + "`r`n" }
 }

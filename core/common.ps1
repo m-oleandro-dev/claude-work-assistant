@@ -88,7 +88,9 @@ function Set-WAState([string]$name, [string]$value) {
   $json = (New-Object PSObject -Property @{ modules = (New-Object PSObject -Property $mods) }) | ConvertTo-Json -Depth 4
   $tmp = "$($script:WAState).tmp"
   [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
-  Move-Item -LiteralPath $tmp -Destination $script:WAState -Force
+  # Sostituzione atomica quando il file esiste: chi legge non trova mai uno stato mancante.
+  if (Test-Path -LiteralPath $script:WAState) { [IO.File]::Replace($tmp, $script:WAState, $null) }
+  else { Move-Item -LiteralPath $tmp -Destination $script:WAState -Force }
 }
 
 # 'on' o 'off' per un modulo (oggetto da Get-WAModules o nome).

@@ -11,7 +11,13 @@ $script:VoiceMarker = '[voce]'
 $script:VoiceDryRun = ($env:CLAUDE_WORK_ASSISTANT_DRYRUN -eq '1' -or $env:CLAUDE_VOICE_READER_DRYRUN -eq '1')
 
 # Lo stato del modulo e in state.json (vedi core/common.ps1); il vecchio file voice-off non e piu usato.
-function Test-VoiceOff { -not (Test-WAModuleEnabled 'voice') }
+# Un errore momentaneo di lettura di state.json equivale a "tutti i moduli predefiniti" (voce spenta): prima di
+# dichiarare la voce spenta (e svuotare la coda) rileggo dopo un attimo.
+function Test-VoiceOff {
+  if (Test-WAModuleEnabled 'voice') { return $false }
+  Start-Sleep -Milliseconds 200
+  return -not (Test-WAModuleEnabled 'voice')
+}
 
 function Write-VoiceLog([string]$msg) {
   try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff') [$PID] $msg" | Add-Content -Path $script:VoiceLog -Encoding UTF8 } catch { }
@@ -125,11 +131,20 @@ function Add-VoiceQueueItem([string]$text, [string]$source) {
   $owned = $false
   try {
     try { $owned = $m.WaitOne(3000) } catch { $owned = $true }  # mutex abbandonato: ora e nostro
+    # Doppioni: stesso testo entro 3 minuti (arriva da Stop, SubagentStop e Handback); righe "hash ticks".
+    $now = [DateTime]::UtcNow.Ticks
+    $window = [TimeSpan]::FromMinutes(3).Ticks
     $known = @()
     if (Test-Path $script:VoiceHashes) { $known = @(Get-Content $script:VoiceHashes) }
-    if ($known -contains $hash) { Write-VoiceLog "doppione ignorato ($source, $hash)"; return $false }
-    $known = @($known + $hash) | Select-Object -Last 200
-    Set-Content -Path $script:VoiceHashes -Value $known -Encoding ASCII
+    $recent = @()
+    foreach ($ln in $known) {
+      $p = $ln -split ' '
+      $ticks = 0L
+      if ($p.Count -ge 2 -and [long]::TryParse($p[1], [ref]$ticks) -and ($now - $ticks) -lt $window) { $recent += $ln }
+    }
+    foreach ($ln in $recent) { if (($ln -split ' ')[0] -eq $hash) { Write-VoiceLog "doppione ignorato ($source, $hash)"; return $false } }
+    if ($owned) { Set-Content -Path $script:VoiceHashes -Value @($recent + "$hash $now") -Encoding ASCII }
+    else { Write-VoiceLog 'blocco della coda non ottenuto: accodo senza registrare il doppione' }
     # Nome ordinabile: tick UTC a 19 cifre + pid; scrittura in .tmp e rinomina, cosi il worker non legge file a meta
     $name = '{0:D19}-{1}-{2}' -f [DateTime]::UtcNow.Ticks, $PID, $source
     $tmp = Join-Path $script:VoiceQueue "$name.tmp"

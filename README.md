@@ -49,13 +49,16 @@ Altri moduli arriveranno: ognuno e una cartella in `modules/` e si attiva o disa
 - **UserPromptSubmit**: chiede a Claude risposte brevi e adatte all'ascolto e gli ricorda il marcatore `[voce]`.
 - **Coda di lettura**: ogni testo entra in una coda FIFO (`%TEMP%\claude-voice-reader-queue\`) con un solo lettore
   alla volta (mutex con nome `Local\ClaudeVoiceReaderWorker`): le letture non si sovrappongono. I doppioni
-  identici vengono scartati (impronte SHA1 in `spoken.hashes`). Spegnere il modulo svuota la coda e ferma la lettura.
+  identici vengono scartati entro 3 minuti (impronte SHA1 con ora in `spoken.hashes`). Spegnere il modulo svuota la coda e ferma la lettura.
 - Registro: `%TEMP%\claude-voice-reader.log`. Prove senza audio: `CLAUDE_WORK_ASSISTANT_DRYRUN=1`
   (vale anche il vecchio `CLAUDE_VOICE_READER_DRYRUN=1`).
 - **Pronuncia inglese**: i termini tecnici inglesi (file, commit, branch, settings, sigle come API) vengono letti
   con pronuncia inglese anche dalla voce italiana: `espeak-ng.dll` trascrive ogni parola in IPA (inglese per i
   termini riconosciuti da un dizionario e da alcune euristiche, italiano per il resto) e sherpa-onnx legge il testo
   con quel lessico. Se la DLL manca o qualcosa fallisce, si torna alla lettura normale tutta italiana.
+- **Robustezza**: un errore su un messaggio non ferma gli altri; ogni lettura usa un file audio proprio; sherpa ha un
+  tempo massimo di 45 secondi; se espeak va in crash, il file `voice-dataespeak.probing` sospende la pronuncia
+  inglese per un giorno (cancellalo per riprovare subito); il registro riparte da zero oltre 1 MB.
 - Dati della voce: `%USERPROFILE%\.claude\work-assistant\voice-data`. La vecchia cartella
   `%USERPROFILE%\.claude\voice-reader-data` e il file `%USERPROFILE%\.claude\voice-off` della versione 0.1
   **non sono piu usati**: puoi cancellarli, oppure spostare `voice-reader-data` in `work-assistant\voice-data`
