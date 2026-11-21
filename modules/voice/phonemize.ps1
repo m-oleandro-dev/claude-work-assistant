@@ -170,3 +170,12 @@ function New-VoiceLexiconCore([string]$text, [string]$voiceData, [string]$espeak
   if ($lines.Count -eq 0) { return $null }
   return @{ Text = $outText.ToString(); Lexicon = ($lines -join "`r`n") + "`r`n" }
 }
+
+# $true se il testo contiene almeno una parola inglese. La modalita con lessico perde parte della prosodia
+# (pause e intonazione tra le parole): si usa solo quando serve, altrimenti resta la lettura normale.
+function Test-HasEnglish([string]$text) {
+  foreach ($mt in [regex]::Matches($text, "[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*")) {
+    if (Test-EnglishWord $mt.Value) { return $true }
+  }
+  return $false
+}

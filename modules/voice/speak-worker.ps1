@@ -65,7 +65,7 @@ function Invoke-Speak([string]$text, [string]$name) {
     $model = @("--vits-model=$m\it_IT-paola-medium.onnx", "--vits-tokens=$m\tokens.txt")
     # Pronuncia inglese dei termini tecnici: lessico generato con espeak-ng.dll; se manca o fallisce, modalita normale.
     $lex = $null
-    try { $lex = New-VoiceLexicon $text $root $m "$m\tokens.txt" } catch { Write-VoiceLog "lessico non creato: $($_.Exception.Message)" }
+    try { if (Test-HasEnglish $text) { $lex = New-VoiceLexicon $text $root $m "$m\tokens.txt" } } catch { Write-VoiceLog "lessico non creato: $($_.Exception.Message)" }
     if ($lex) {
       $lexFile = Join-Path $env:TEMP "claude-voice-reader-lexicon-$PID.txt"
       [IO.File]::WriteAllText($lexFile, $lex.Lexicon, (New-Object Text.UTF8Encoding($false)))
