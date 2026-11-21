@@ -63,17 +63,34 @@ function Invoke-Speak([string]$text, [string]$name) {
   $ok = $false
   if ($bin -and (Test-Path "$m\it_IT-paola-medium.onnx")) {
     $model = @("--vits-model=$m\it_IT-paola-medium.onnx", "--vits-tokens=$m\tokens.txt")
-    # Pronuncia inglese dei termini tecnici: lessico generato con espeak-ng.dll; se manca o fallisce, modalita normale.
-    $lex = $null
-    try { if (Test-HasEnglish $text) { $lex = New-VoiceLexicon $text $root $m "$m\tokens.txt" } } catch { Write-VoiceLog "lessico non creato: $($_.Exception.Message)" }
-    if ($lex) {
-      $lexFile = Join-Path $env:TEMP "claude-voice-reader-lexicon-$PID.txt"
-      [IO.File]::WriteAllText($lexFile, $lex.Lexicon, (New-Object Text.UTF8Encoding($false)))
-      $ok = Invoke-Sherpa ($model + "--vits-lexicon=$lexFile") (ConvertTo-SherpaArg $lex.Text) $wav
-      Remove-Item $lexFile -Force -ErrorAction SilentlyContinue
-      if (-not $ok) { Write-VoiceLog 'sintesi con lessico non riuscita, riprovo in modalita normale' }
+    # Il testo viene diviso in blocchi: le frasi tutte italiane restano nella modalita normale (migliore ritmo e
+    # pause, come prima); solo le frasi con parole inglesi usano il lessico (pronuncia inglese), una alla volta.
+    # I wav dei blocchi vengono poi uniti con una breve pausa. Se un blocco fallisce, si rilegge tutto in modo normale.
+    $parts = @()
+    $allOk = $true
+    $idx = 0
+    foreach ($chunk in @(Split-SpeechChunks $text)) {
+      $idx++
+      $cw = Join-Path $env:TEMP "claude-voice-reader-$PID-$idx.wav"
+      $cok = $false
+      if ($chunk.English) {
+        $lex = $null
+        try { $lex = New-VoiceLexicon $chunk.Text $root $m "$m\tokens.txt" } catch { Write-VoiceLog "lessico non creato: $($_.Exception.Message)" }
+        if ($lex) {
+          $lexFile = Join-Path $env:TEMP "claude-voice-reader-lexicon-$PID.txt"
+          [IO.File]::WriteAllText($lexFile, $lex.Lexicon, (New-Object Text.UTF8Encoding($false)))
+          $cok = Invoke-Sherpa ($model + "--vits-lexicon=$lexFile") (ConvertTo-SherpaArg $lex.Text) $cw
+          Remove-Item $lexFile -Force -ErrorAction SilentlyContinue
+        }
+      }
+      if (-not $cok) { $cok = Invoke-Sherpa ($model + "--vits-data-dir=$m\espeak-ng-data") (ConvertTo-SherpaArg $chunk.Text) $cw }
+      if (-not $cok) { $allOk = $false; break }
+      $parts += $cw
     }
+    if ($allOk -and $parts.Count -gt 0) { $ok = Join-Wavs $parts $wav }
+    foreach ($p in $parts) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
     if (-not $ok) {
+      Write-VoiceLog 'sintesi a blocchi non riuscita, riprovo con tutto il testo in modalita normale'
       $ok = Invoke-Sherpa ($model + "--vits-data-dir=$m\espeak-ng-data") (ConvertTo-SherpaArg $text) $wav
     }
   }

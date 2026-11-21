@@ -179,3 +179,54 @@ function Test-HasEnglish([string]$text) {
   }
   return $false
 }
+
+# Divide il testo in blocchi da sintetizzare: frasi consecutive tutte italiane vengono unite in un blocco solo
+# (lettura normale), ogni frase con parole inglesi e un blocco a se (lettura con lessico).
+function Split-SpeechChunks([string]$text) {
+  $chunks = New-Object System.Collections.ArrayList
+  $pendingIt = ''
+  foreach ($s in [regex]::Split($text, '(?<=[.!?;:])\s+|\s*[\r\n]+\s*')) {
+    $s = $s.Trim()
+    if (-not $s) { continue }
+    if (Test-HasEnglish $s) {
+      if ($pendingIt) { [void]$chunks.Add(@{ Text = $pendingIt; English = $false }); $pendingIt = '' }
+      [void]$chunks.Add(@{ Text = $s; English = $true })
+    } else {
+      $pendingIt = if ($pendingIt) { "$pendingIt $s" } else { $s }
+    }
+  }
+  if ($pendingIt) { [void]$chunks.Add(@{ Text = $pendingIt; English = $false }) }
+  return $chunks.ToArray()
+}
+
+# Unisce piu wav (PCM 16 bit, stesso formato) in uno solo, con una pausa tra l'uno e l'altro.
+function Join-Wavs([string[]]$paths, [string]$outPath, [int]$pauseMs = 220) {
+  try {
+    $pcm = New-Object IO.MemoryStream
+    $rate = 0; $ch = 1; $bits = 16
+    foreach ($p in $paths) {
+      $b = [IO.File]::ReadAllBytes($p)
+      $pos = 12; $data = $null
+      while ($pos + 8 -le $b.Length) {
+        $id = [Text.Encoding]::ASCII.GetString($b, $pos, 4)
+        $len = [BitConverter]::ToInt32($b, $pos + 4)
+        if ($id -eq 'fmt ' -and $rate -eq 0) { $ch = [BitConverter]::ToInt16($b, $pos + 10); $rate = [BitConverter]::ToInt32($b, $pos + 12); $bits = [BitConverter]::ToInt16($b, $pos + 22) }
+        if ($id -eq 'data') { $n = [Math]::Min($len, $b.Length - ($pos + 8)); if ($len -lt 0) { $n = $b.Length - ($pos + 8) }; $data = @(($pos + 8), $n); break }
+        $pos += 8 + $len + ($len % 2)
+      }
+      if (-not $data -or $rate -eq 0) { return $false }
+      if ($pcm.Length -gt 0) {
+        $sil = New-Object byte[] ([int]($rate * $ch * ($bits / 8) * $pauseMs / 1000) -band -2)
+        $pcm.Write($sil, 0, $sil.Length)
+      }
+      $pcm.Write($b, $data[0], $data[1])
+    }
+    $o = New-Object IO.MemoryStream
+    $w = New-Object IO.BinaryWriter($o)
+    $w.Write([Text.Encoding]::ASCII.GetBytes('RIFF')); $w.Write([int](36 + $pcm.Length)); $w.Write([Text.Encoding]::ASCII.GetBytes('WAVEfmt '))
+    $w.Write([int]16); $w.Write([int16]1); $w.Write([int16]$ch); $w.Write([int]$rate); $w.Write([int]($rate * $ch * $bits / 8)); $w.Write([int16]($ch * $bits / 8)); $w.Write([int16]$bits)
+    $w.Write([Text.Encoding]::ASCII.GetBytes('data')); $w.Write([int]$pcm.Length); $w.Write($pcm.ToArray()); $w.Flush()
+    [IO.File]::WriteAllBytes($outPath, $o.ToArray())
+    return $true
+  } catch { return $false }
+}
